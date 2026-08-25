@@ -1,4 +1,10 @@
-streamlit
-langchain-groq
-langchain-core
-mistralai
+streamlit>=1.36
+langchain-groq>=0.1.9
+langchain-core>=0.2.38
+requests>=2.32
+mistralai>=1.0.3
+moviepy>=1.0.3
+numpy>=1.26
+Pillow>=10.3
+imageio>=2.34
+imageio-ffmpeg>=0.5.1
