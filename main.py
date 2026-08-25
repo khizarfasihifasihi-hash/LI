@@ -191,12 +191,25 @@ use_examples = st.checkbox(
     value=False,
 )
 
+# NEW FEATURE: generate multiple variants at once so the user can pick the
+# best one instead of re-rolling one-at-a-time.
+num_variants = st.slider(
+    "🧪 Number of variants to generate",
+    min_value=1,
+    max_value=3,
+    value=1,
+    help="Generate several different takes on the same brief in one go, "
+         "shown side-by-side in tabs, and pick your favorite.",
+)
+
 generate_image_toggle = st.checkbox(
     "🎨 Also generate a matching image for this post",
     value=False,
     help="Creates an AI image sized for the selected platform, based on the "
          "post's topic, tone, AND the actual generated post text — using "
-         "whichever engine is selected in the sidebar.",
+         "whichever engine is selected in the sidebar. When generating "
+         "multiple variants, the image is created for whichever variant "
+         "you select as the keeper.",
 )
 
 def load_examples(category_name: str, n: int = 2):
@@ -242,7 +255,9 @@ Formatting Rules:
 - {hashtag_instruction} 
 
 Core Content Context Topic:
-{topic} 
+{topic}
+
+{variant_instruction}
 
 {example_block}"""
 
@@ -393,13 +408,45 @@ def render_image_block(prompt: str, width: int, height: int, state_key: str, eng
                 st.error(f"Image generation failed: {e}")
 
 
+def _make_image_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
+                           image_engine: str, mistral_api_key: str, mistral_image_model: str) -> None:
+    """Generate and attach a matching image to a history entry in-place."""
+    img_width, img_height = PLATFORM_IMAGE_SIZE.get(website, (1080, 1080))
+    aspect_label = _aspect_label(img_width, img_height)
+    image_prompt = build_image_prompt(topic, category, tone, post_text, aspect_label)
+    state_key = f"post_image_{len(st.session_state.history)}"
+    with st.spinner(f"Generating a matching image with {image_engine.split(' ')[0]}..."):
+        try:
+            st.session_state[state_key] = generate_image(
+                image_prompt, img_width, img_height,
+                image_engine, mistral_api_key, mistral_image_model,
+            )
+            history_entry["image_key"] = state_key
+            history_entry["image_prompt"] = image_prompt
+            history_entry["image_engine"] = image_engine
+        except Exception as e:
+            st.error(f"Image generation failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Generation Logic Engine
 # ---------------------------------------------------------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
+if "pending_variants" not in st.session_state:
+    st.session_state.pending_variants = []
+if "pending_config" not in st.session_state:
+    st.session_state.pending_config = {}
 
 generate = st.button("🚀 Generate post", type="primary", use_container_width=True)
+
+# Slight variety hints so multiple variants don't come back near-identical
+# even at the same temperature.
+VARIANT_ANGLES = [
+    "Take a direct, get-to-the-point angle.",
+    "Lead with a hook, anecdote, or surprising observation before the main point.",
+    "Frame it around a question or a lesson learned.",
+]
 
 if generate:
     if not api_key:
@@ -427,67 +474,82 @@ if generate:
                 )
         
         try:
-            with st.spinner("Writing your post..."):
-                chain = build_chain(api_key, model, temperature)
-                post_text = chain.invoke(
-                    {
-                        "website": website,
-                        "category": category,
-                        "tone": tone,
-                        "length_desc": LENGTH_MAP[length],
-                        "language": language,
-                        "emoji_instruction": emoji_instruction,
-                        "hashtag_instruction": hashtag_instruction,
-                        "topic": topic,
-                        "example_block": example_block
-                    }
-                )
-                
-                # Display output window
-                st.subheader("✨ Generated Output")
-                st.text_area("Copy your post text:", value=post_text, height=350)
-
-                history_entry = {"platform": website, "content": post_text, "image_key": None}
-
-                # Optionally generate a matching image right away - grounded
-                # in BOTH the topic and the post text the LLM just wrote, so
-                # the two generation steps are genuinely connected.
-                if generate_image_toggle:
-                    img_width, img_height = PLATFORM_IMAGE_SIZE.get(website, (1080, 1080))
-                    aspect_label = _aspect_label(img_width, img_height)
-                    image_prompt = build_image_prompt(topic, category, tone, post_text, aspect_label)
-                    state_key = f"post_image_{len(st.session_state.history)}"
-                    with st.spinner(f"Generating a matching image with {image_engine.split(' ')[0]}..."):
-                        try:
-                            st.session_state[state_key] = generate_image(
-                                image_prompt, img_width, img_height,
-                                image_engine, mistral_api_key, mistral_image_model,
-                            )
-                            history_entry["image_key"] = state_key
-                            history_entry["image_prompt"] = image_prompt
-                            history_entry["image_engine"] = image_engine
-                        except Exception as e:
-                            st.error(f"Image generation failed: {e}")
-
-                # Append to active session history state
-                st.session_state.history.append(history_entry)
-
-                # Show the freshly generated image (if any) right below the post
-                if history_entry["image_key"]:
-                    img_width, img_height = PLATFORM_IMAGE_SIZE.get(website, (1080, 1080))
-                    st.subheader("🖼️ Generated Image")
-                    render_image_block(
-                        history_entry["image_prompt"],
-                        img_width,
-                        img_height,
-                        history_entry["image_key"],
-                        image_engine,
-                        mistral_api_key,
-                        mistral_image_model,
+            chain = build_chain(api_key, model, temperature)
+            variants = []
+            with st.spinner(
+                f"Writing {num_variants} variant{'s' if num_variants > 1 else ''}..."
+            ):
+                for i in range(num_variants):
+                    variant_instruction = (
+                        VARIANT_ANGLES[i % len(VARIANT_ANGLES)] if num_variants > 1 else ""
                     )
-                
+                    post_text = chain.invoke(
+                        {
+                            "website": website,
+                            "category": category,
+                            "tone": tone,
+                            "length_desc": LENGTH_MAP[length],
+                            "language": language,
+                            "emoji_instruction": emoji_instruction,
+                            "hashtag_instruction": hashtag_instruction,
+                            "topic": topic,
+                            "variant_instruction": variant_instruction,
+                            "example_block": example_block,
+                        }
+                    )
+                    variants.append(post_text)
+
+            # Stash for the picker UI below so a rerun (e.g. from clicking
+            # "Use this variant") doesn't lose the generated options.
+            st.session_state.pending_variants = variants
+            st.session_state.pending_config = {
+                "website": website,
+                "topic": topic,
+                "category": category,
+                "tone": tone,
+                "generate_image_toggle": generate_image_toggle,
+                "image_engine": image_engine,
+                "mistral_api_key": mistral_api_key,
+                "mistral_image_model": mistral_image_model,
+            }
+
         except Exception as e:
             st.error(f"An error occurred during LLM text generation: {e}")
+
+# Show whichever variants are pending selection (persists across reruns).
+if st.session_state.pending_variants:
+    cfg = st.session_state.pending_config
+    variants = st.session_state.pending_variants
+
+    st.subheader("✨ Generated Output")
+    if len(variants) == 1:
+        st.text_area("Copy your post text:", value=variants[0], height=350)
+        chosen_text = variants[0]
+        use_clicked = True
+    else:
+        tabs = st.tabs([f"Variant {i+1}" for i in range(len(variants))])
+        chosen_text = None
+        use_clicked = False
+        for i, (tab, text) in enumerate(zip(tabs, variants)):
+            with tab:
+                st.text_area("Copy this variant:", value=text, height=300, key=f"variant_text_{i}")
+                if st.button(f"✅ Use Variant {i+1}", key=f"use_variant_{i}"):
+                    chosen_text = text
+                    use_clicked = True
+
+    if use_clicked and chosen_text:
+        history_entry = {"platform": cfg["website"], "content": chosen_text, "image_key": None}
+
+        if cfg["generate_image_toggle"]:
+            _make_image_for_entry(
+                history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
+                chosen_text, cfg["image_engine"], cfg["mistral_api_key"], cfg["mistral_image_model"],
+            )
+
+        st.session_state.history.append(history_entry)
+        st.session_state.pending_variants = []
+        st.session_state.pending_config = {}
+        st.rerun()
 
 # Render basic log list of generated posts if any exist
 if st.session_state.history:
