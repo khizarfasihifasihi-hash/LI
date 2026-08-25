@@ -22,15 +22,16 @@ st.set_page_config(
 # Expanded Option Lists
 # ---------------------------------------------------------------------------
 CATEGORIES = [
-    "New job announcement", "Work anniversary", "Achievement / milestone", 
+    
+    "Hiring me", "New job announcement", "Work anniversary", "Achievement/milestone", 
     "Promotion", "Hiring announcement", "Company layoff response",
     "Thought leadership", "Lessons learned / failure story", "Industry trends analysis",
-    "Tips / advice", "Book / article review", "Myth busting",
+    "Tips/advice", "Book/article review", "Myth busting",
     "Certification completed", "Graduation", "Course recommendation", "Personal transformation",
-    "Conference / event recap", "Team appreciation", "Networking / gratitude", 
+    "Conference/event recap", "Team appreciation", "Networking/gratitude", 
     "Event invitation", "Webinar announcement",
     "Product launch", "Startup journey update", "Funding round announcement", 
-    "Case study / client success", "Behind-the-scenes look", "about news update post on media"
+    "Case study/client success", "Behind-the-scenes look", "about news update post on media"
 ]
 
 TONES = [
