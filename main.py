@@ -49,7 +49,7 @@ LANGUAGES = [
 WEBSITE = [
     "Linkedin", "Facebook", "Instagram", "Youtube", "X (Twitter)", 
     "Threads", "Tiktok", "Snapchat", "Pinterest", "Reddit", 
-    "Quora", "Discord", "Whatsapp", "Telegram"
+    "Quora", "Discord", "Whatsapp", "Telegram", "Fiverr gigs"
 ]
 
 # Sensible default image canvas per platform - a square Instagram crop and a
