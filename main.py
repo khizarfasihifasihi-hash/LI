@@ -22,7 +22,7 @@ st.set_page_config(
 # Expanded Option Lists
 # ---------------------------------------------------------------------------
 CATEGORIES = [
-    
+    "Posting on Website",
     "Hiring me", "New job announcement", "Work anniversary", "Achievement/milestone", 
     "Promotion", "Hiring announcement", "Company layoff response",
     "Thought leadership", "Lessons learned / failure story", "Industry trends analysis",
