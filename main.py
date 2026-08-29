@@ -29,25 +29,42 @@ CATEGORIES = [
     "Conference/event recap", "Team appreciation", "Networking/gratitude",
     "Event invitation", "Webinar announcement",
     "Product launch", "Startup journey update", "Funding round announcement",
-    "Case study/client success", "Behind-the-scenes look", "about news update post on media"
+    "Case study/client success", "Behind-the-scenes look", "about news update post on media",
+    # --- e-commerce / product-focused ---
+    "Product showcase", "New arrival announcement", "Product restock", "Flash sale/discount",
+    "Limited-time offer", "Product bundle deal", "Customer review/testimonial highlight",
+    "Unboxing/first look", "How-to / product tutorial", "Before & after", "Seasonal collection drop",
+    "Gift guide", "Comparison (this vs that)", "FAQ / product Q&A", "Out of stock / back-order notice",
+    # --- more general categories ---
+    "Poll/question to audience", "This or that", "Fun fact / trivia", "Motivational quote",
+    "Holiday/seasonal greeting", "Company milestone (revenue, users, years in business)",
+    "Partnership/collaboration announcement", "Recruitment drive", "Internship program announcement",
+    "Community shoutout", "User-generated content repost", "Apology/service update",
 ]
 
 TONES = [
     "Professional", "Casual & friendly", "Inspirational", "Storytelling", "Bold & confident",
     "Humorous & witty", "Empathetic & vulnerable", "Educational & authoritative",
-    "Contrarian / provocative", "Urgent & hype-building"
+    "Contrarian / provocative", "Urgent & hype-building",
+    "Playful & quirky", "Luxurious & aspirational", "Minimal & understated", "Warm & conversational",
+    "Sarcastic/deadpan", "Nostalgic", "Data-driven & analytical", "Reassuring & trustworthy",
+    "Edgy & rebellious", "Celebratory",
 ]
 
 LANGUAGES = [
     "English", "Urdu", "Roman Urdu (Urdu written in English letters)", "Arabic",
     "Spanish", "French", "Hindi", "German", "Portuguese", "Turkish",
     "Indonesia", "Russian", "Persian",
+    "Italian", "Chinese (Simplified)", "Japanese", "Korean", "Bengali", "Punjabi",
+    "Pashto", "Sindhi", "Dutch", "Swahili", "Vietnamese", "Thai", "Polish", "Greek", "Hebrew",
 ]
 
 WEBSITE = [
     "Linkedin", "Facebook", "Instagram", "Youtube", "X (Twitter)",
     "Threads", "Tiktok", "Snapchat", "Pinterest", "Reddit",
-    "Quora", "Discord", "Whatsapp", "Telegram", "Fiverr gigs"
+    "Quora", "Discord", "Whatsapp", "Telegram", "Fiverr gigs",
+    "Etsy shop update", "Shopify/store announcement", "Amazon listing blurb",
+    "Medium", "Substack/Newsletter", "Google Business Profile", "Upwork profile/proposal",
 ]
 
 # Sensible default image canvas per platform - a square Instagram crop and a
@@ -178,6 +195,25 @@ topic = st.text_area(
     height=120,
 )
 
+# Optional product/item details - only relevant for e-commerce-style posts
+# (product showcase, sale, listing blurb, etc.) but harmless to leave off
+# for any other category.
+include_product = st.checkbox("🛍️ This post is about a specific product/item", value=False)
+product_name = ""
+product_price = ""
+product_features = ""
+if include_product:
+    p_col1, p_col2 = st.columns(2)
+    with p_col1:
+        product_name = st.text_input("Product/Item name", placeholder="e.g. Aura Wireless Earbuds")
+    with p_col2:
+        product_price = st.text_input("Price (optional)", placeholder="e.g. $49.99 or Rs. 6,999")
+    product_features = st.text_area(
+        "Key features/selling points (optional)",
+        placeholder="e.g. 30hr battery, active noise cancellation, waterproof, 2-year warranty",
+        height=80,
+    )
+
 # Output Style Controls
 col_len, col_lang, col_opts = st.columns(3)
 with col_len:
@@ -238,6 +274,26 @@ else:
     video_seconds_per_scene = 3
 
 
+def build_product_block(name: str, price: str, features: str) -> str:
+    """Turn the optional product/item fields into a labelled block the
+    prompt template can drop in as extra grounding. Returns an empty
+    string when no product info was provided, so it's harmless to include
+    unconditionally in the template."""
+    name = (name or "").strip()
+    price = (price or "").strip()
+    features = (features or "").strip()
+    if not (name or price or features):
+        return ""
+    lines = ["Product/Item details to reference in the post:"]
+    if name:
+        lines.append(f"- Name: {name}")
+    if price:
+        lines.append(f"- Price: {price}")
+    if features:
+        lines.append(f"- Key features/selling points: {features}")
+    return "\n".join(lines)
+
+
 def load_examples(category_name: str, n: int = 2):
     path = os.path.join(os.path.dirname(__file__), "linkedin_post_dataset.json")
     if not os.path.exists(path):
@@ -282,6 +338,8 @@ Formatting Rules:
 Core Content Context Topic:
 {topic}
 
+{product_block}
+
 {variant_instruction}
 
 {example_block}"""
@@ -298,7 +356,8 @@ def build_chain(api_key: str, model: str, temperature: float):
     return prompt | llm | StrOutputParser()
 
 
-def build_image_prompt(topic: str, category: str, tone: str, post_text: str = "", aspect_label: str = "") -> str:
+def build_image_prompt(topic: str, category: str, tone: str, post_text: str = "", aspect_label: str = "",
+                        product_name: str = "") -> str:
     """Turn the post's topic/category/tone - AND the actual generated post
     copy - into a text-to-image prompt. This is what "connects" the two
     generation steps: the image is grounded in what the post actually says,
@@ -310,6 +369,8 @@ def build_image_prompt(topic: str, category: str, tone: str, post_text: str = ""
         f"Visual style: clean, modern, {tone.lower()} mood, well suited for a "
         f"{category.lower()} post. No embedded text, no watermarks, no logos."
     )
+    if product_name.strip():
+        prompt += f" The central subject should be the product: {product_name.strip()}."
     if post_text.strip():
         # Keep this short - we only want the gist/keywords of the post as
         # visual grounding, not the literal caption rendered as an image.
@@ -406,11 +467,11 @@ def render_image_block(prompt: str, width: int, height: int, state_key: str, mis
 
 
 def _make_image_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                           mistral_api_key: str, mistral_image_model: str) -> None:
+                           mistral_api_key: str, mistral_image_model: str, product_name: str = "") -> None:
     """Generate and attach a matching image to a history entry in-place."""
     img_width, img_height = PLATFORM_IMAGE_SIZE.get(website, (1080, 1080))
     aspect_label = _aspect_label(img_width, img_height)
-    image_prompt = build_image_prompt(topic, category, tone, post_text, aspect_label)
+    image_prompt = build_image_prompt(topic, category, tone, post_text, aspect_label, product_name)
     state_key = f"post_image_{len(st.session_state.history)}"
     with st.spinner("Generating a matching image with Mistral..."):
         try:
@@ -511,7 +572,8 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int,
 
 
 def render_video_block(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                        mistral_key: str, mistral_model: str, num_scenes: int, seconds_per_scene: int) -> None:
+                        mistral_key: str, mistral_model: str, num_scenes: int, seconds_per_scene: int,
+                        product_name: str = "") -> None:
     """Show the generated video (if any) for a history entry, plus a
     regenerate button that reroles the whole scene set."""
     video_key = history_entry.get("video_key")
@@ -527,21 +589,21 @@ def render_video_block(history_entry: dict, website: str, topic: str, category: 
     if st.button("🔁 Regenerate video", key=f"regen_video_{video_key or id(history_entry)}"):
         _make_video_for_entry(
             history_entry, website, topic, category, tone, post_text,
-            mistral_key, mistral_model, num_scenes, seconds_per_scene,
+            mistral_key, mistral_model, num_scenes, seconds_per_scene, product_name,
         )
         st.rerun()
 
 
 def _make_video_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
                            mistral_api_key: str, mistral_image_model: str,
-                           num_scenes: int, seconds_per_scene: int) -> None:
+                           num_scenes: int, seconds_per_scene: int, product_name: str = "") -> None:
     """Storyboard the post into scenes, generate a scene image for each,
     stitch them into a slideshow video, and attach it to a history entry."""
     vid_width, vid_height = PLATFORM_VIDEO_SIZE.get(website, (1080, 1920))
     aspect_label = _aspect_label(vid_width, vid_height)
     scenes = split_into_scenes(topic, post_text, num_scenes)
     scene_prompts = [
-        build_image_prompt(topic, category, tone, scene, aspect_label) for scene in scenes
+        build_image_prompt(topic, category, tone, scene, aspect_label, product_name) for scene in scenes
     ]
     state_key = f"post_video_{len(st.session_state.history)}"
     status_box = st.empty()
@@ -605,6 +667,8 @@ if generate:
                     "(do not copy them, just match the tone and structure):\n\n" + joined
                 )
 
+        product_block = build_product_block(product_name, product_price, product_features) if include_product else ""
+
         try:
             chain = build_chain(api_key, model, temperature)
             variants = []
@@ -627,6 +691,7 @@ if generate:
                             "topic": topic,
                             "variant_instruction": variant_instruction,
                             "example_block": example_block,
+                            "product_block": product_block,
                         }
                     )
                     variants.append(post_text)
@@ -639,6 +704,7 @@ if generate:
                 "topic": topic,
                 "category": category,
                 "tone": tone,
+                "product_name": product_name,
                 "generate_image_toggle": generate_image_toggle,
                 "generate_video_toggle": generate_video_toggle,
                 "video_num_scenes": video_num_scenes,
@@ -678,6 +744,7 @@ if st.session_state.pending_variants:
             "topic": cfg["topic"],
             "category": cfg["category"],
             "tone": cfg["tone"],
+            "product_name": cfg.get("product_name", ""),
             "image_key": None,
             "video_key": None,
         }
@@ -685,14 +752,14 @@ if st.session_state.pending_variants:
         if cfg["generate_image_toggle"]:
             _make_image_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
-                chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"],
+                chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"], cfg.get("product_name", ""),
             )
 
         if cfg.get("generate_video_toggle"):
             _make_video_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
                 chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"],
-                cfg["video_num_scenes"], cfg["video_seconds_per_scene"],
+                cfg["video_num_scenes"], cfg["video_seconds_per_scene"], cfg.get("product_name", ""),
             )
 
         st.session_state.history.append(history_entry)
@@ -720,6 +787,7 @@ if st.session_state.history:
                     image_prompt = build_image_prompt(
                         historical_post.get("topic", ""), historical_post.get("category", ""),
                         historical_post.get("tone", ""), historical_post["content"], aspect_label,
+                        historical_post.get("product_name", ""),
                     )
                 render_image_block(
                     image_prompt, img_width, img_height, image_key,
@@ -736,4 +804,5 @@ if st.session_state.history:
                     historical_post.get("tone", ""), historical_post["content"],
                     mistral_api_key, mistral_image_model,
                     video_num_scenes, video_seconds_per_scene,
+                    historical_post.get("product_name", ""),
                 )
