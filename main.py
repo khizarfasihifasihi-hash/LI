@@ -345,28 +345,7 @@ def build_image_prompt(topic: str, category: str, tone: str, post_text: str = ""
     return prompt
 
 
-def generate_image_bytes_stability(prompt: str, width: int, height: int, api_key: str) -> bytes:
-    """Generate an image from a text prompt using Stability AI's API.
-    Returns raw image bytes (or raises on failure/timeout, which the caller should catch)."""
-    if not api_key:
-        raise ValueError("Stability AI API key is required for this image engine.")
-    
-    url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "image/jpeg",
-    }
-    
-    files = {
-        "prompt": (None, prompt),
-        "output_format": (None, "jpeg"),
-        "model": (None, "sd3.5-large"),
-    }
-    
-    response = requests.post(url, headers=headers, files=files, timeout=90)
-    response.raise_for_status()
-    return response.content
+
 
 
 def get_mistral_image_agent(api_key: str, agent_model: str):
