@@ -519,11 +519,11 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int,
     them into an MP4 slideshow with a gentle Ken-Burns zoom and a
     cross-fade between scenes. Returns raw MP4 bytes."""
     try:
-        from moviepy.editor import ImageClip, concatenate_videoclips, vfx
+        from moviepy import ImageClip, concatenate_videoclips, vfx
     except ImportError as exc:
         raise RuntimeError(
-            "Video generation needs the 'moviepy' package and an ffmpeg "
-            "binary installed on this machine. Install with: "
+            "Video generation needs the 'moviepy' package (v2.x) and an "
+            "ffmpeg binary installed on this machine. Install with: "
             "pip install moviepy"
         ) from exc
 
@@ -533,6 +533,8 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int,
     import numpy as np
     from PIL import Image
 
+    fade_seconds = min(0.6, seconds_per_scene / 3)
+
     clips = []
     for i, scene_prompt in enumerate(scene_prompts):
         if status_cb:
@@ -540,24 +542,28 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int,
         img_bytes = generate_image(scene_prompt, mistral_key, mistral_model)
         frame = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((width, height)))
 
-        clip = ImageClip(frame).set_duration(seconds_per_scene)
-        # Subtle Ken-Burns zoom so a static image doesn't feel like a slide.
-        clip = clip.fx(vfx.resize, lambda t: 1.0 + 0.04 * (t / seconds_per_scene))
-        clip = clip.set_position(("center", "center")).fx(vfx.crossfadein, min(0.6, seconds_per_scene / 3))
+        clip = ImageClip(frame).with_duration(seconds_per_scene)
+        # Subtle Ken-Burns zoom so a static image doesn't feel like a slide,
+        # plus a cross-fade as each scene enters.
+        clip = clip.with_effects([
+            vfx.Resize(lambda t: 1.0 + 0.04 * (t / seconds_per_scene)),
+            vfx.CrossFadeIn(fade_seconds),
+        ])
+        clip = clip.with_position(("center", "center"))
         clips.append(clip)
 
     if status_cb:
         status_cb("Stitching scenes into the final video...")
 
-    final = concatenate_videoclips(clips, method="compose", padding=-min(0.6, seconds_per_scene / 3))
-    final = final.resize((width, height))
+    final = concatenate_videoclips(clips, method="compose", padding=-fade_seconds)
+    final = final.with_effects([vfx.Resize(new_size=(width, height))])
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp_path = tmp.name
     try:
         final.write_videofile(
             tmp_path, fps=fps, codec="libx264", audio=False,
-            verbose=False, logger=None,
+            logger=None,
         )
         with open(tmp_path, "rb") as f:
             video_bytes = f.read()
