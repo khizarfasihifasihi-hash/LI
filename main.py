@@ -1,9 +1,7 @@
 import os
 import json
-import random
-from urllib.parse import quote
+import re
 
-import requests
 import streamlit as st
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -23,32 +21,32 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 CATEGORIES = [
     "Posting on Website",
-    "Hiring me", "New job announcement", "Work anniversary", "Achievement/milestone", 
+    "Hiring me", "New job announcement", "Work anniversary", "Achievement/milestone",
     "Promotion", "Hiring announcement", "Company layoff response",
     "Thought leadership", "Lessons learned / failure story", "Industry trends analysis",
     "Tips/advice", "Book/article review", "Myth busting",
     "Certification completed", "Graduation", "Course recommendation", "Personal transformation",
-    "Conference/event recap", "Team appreciation", "Networking/gratitude", 
+    "Conference/event recap", "Team appreciation", "Networking/gratitude",
     "Event invitation", "Webinar announcement",
-    "Product launch", "Startup journey update", "Funding round announcement", 
+    "Product launch", "Startup journey update", "Funding round announcement",
     "Case study/client success", "Behind-the-scenes look", "about news update post on media"
 ]
 
 TONES = [
     "Professional", "Casual & friendly", "Inspirational", "Storytelling", "Bold & confident",
-    "Humorous & witty", "Empathetic & vulnerable", "Educational & authoritative", 
+    "Humorous & witty", "Empathetic & vulnerable", "Educational & authoritative",
     "Contrarian / provocative", "Urgent & hype-building"
 ]
 
 LANGUAGES = [
-    "English", "Urdu", "Roman Urdu (Urdu written in English letters)", "Arabic", 
-    "Spanish", "French", "Hindi", "German", "Portuguese", "Turkish", 
+    "English", "Urdu", "Roman Urdu (Urdu written in English letters)", "Arabic",
+    "Spanish", "French", "Hindi", "German", "Portuguese", "Turkish",
     "Indonesia", "Russian", "Persian",
 ]
 
 WEBSITE = [
-    "Linkedin", "Facebook", "Instagram", "Youtube", "X (Twitter)", 
-    "Threads", "Tiktok", "Snapchat", "Pinterest", "Reddit", 
+    "Linkedin", "Facebook", "Instagram", "Youtube", "X (Twitter)",
+    "Threads", "Tiktok", "Snapchat", "Pinterest", "Reddit",
     "Quora", "Discord", "Whatsapp", "Telegram", "Fiverr gigs"
 ]
 
@@ -70,7 +68,6 @@ PLATFORM_IMAGE_SIZE = {
     "Discord": (1200, 675),
     "Whatsapp": (1080, 1080),
     "Telegram": (1080, 1080),
-    "Fiverr gigs": (1200, 630),
 }
 
 # Default video canvas per platform - vertical for short-form/story
@@ -90,13 +87,13 @@ PLATFORM_VIDEO_SIZE = {
     "Discord": (1280, 720),
     "Whatsapp": (1080, 1920),
     "Telegram": (1080, 1920),
-    "Fiverr gigs": (1280, 720),
 }
 
-# Rough aspect-ratio label per platform, used only to *describe* the desired
-# framing to the image tool (which - unlike Pollinations - doesn't take
-# explicit width/height parameters, only prompt text).
+
 def _aspect_label(width: int, height: int) -> str:
+    """Rough aspect-ratio label per platform, used only to *describe* the
+    desired framing to the image tool (Mistral's image agent doesn't take
+    explicit width/height parameters, only prompt text)."""
     ratio = width / height
     if abs(ratio - 1) < 0.05:
         return "square (1:1)"
@@ -105,70 +102,8 @@ def _aspect_label(width: int, height: int) -> str:
     return "portrait / vertical, tall format"
 
 
-# Per-platform formatting rules that influence the LLM's output style.
-PLATFORM_PROMPT_OVERRIDES = {
-    "Linkedin": (
-        "Focus on professional polish: 2-3 short paragraphs, one clear call-to-action, "
-        "avoid more than 2 hashtags and use emojis sparingly. Use formal/professional language."
-    ),
-    "Facebook": (
-        "Casual and friendly, 1-2 short paragraphs, 1-3 hashtags allowed, "
-        "use emojis moderately and include a simple CTA (comment or share)."
-    ),
-    "Instagram": (
-        "Short punchy caption with a hook, use emojis and 3-5 hashtags at the end, "
-        "include a CTA (save/share/follow). Use line breaks for readability."
-    ),
-    "X (Twitter)": (
-        "Very short, punchy, under 280 characters. Prefer snappy one-liners, include 1-3 hashtags, "
-        "and 0-2 emojis. If relevant, suggest @mentions."
-    ),
-    "Youtube": (
-        "Longer community post or video description style. Include a short summary, a CTA, "
-        "and a suggested link placeholder. Hashtags optional."
-    ),
-    "Threads": (
-        "Short conversational thread-style post: a strong hook and 2-4 short lines, "
-        "use emojis and 2-3 hashtags."
-    ),
-    "Tiktok": (
-        "Very short caption focused on trends/call-to-action, include 3-6 hashtags and emojis, "
-        "use casual energetic language."
-    ),
-    "Snapchat": (
-        "Brief and casual, heavy emoji acceptance, no hashtags. Keep it immediate and personal."
-    ),
-    "Pinterest": (
-        "Descriptive and keyword-rich caption for discoverability. Include 2-4 hashtags."
-    ),
-    "Reddit": (
-        "Conversational and community-aware. Avoid cross-promotion, no hashtags, "
-        "prefer longer explanations where appropriate and a neutral tone."
-    ),
-    "Quora": (
-        "Informative, long-form answer-like post. No hashtags. Focus on clarity and helpfulness."
-    ),
-    "Discord": (
-        "Short announcement or message, mention roles or links as needed, minimal emojis."
-    ),
-    "Whatsapp": (
-        "Very short, personal message style. No hashtags, casual tone, use emojis sparingly."
-    ),
-    "Telegram": (
-        "Short-to-medium announcement style, include links and 1-2 hashtags if helpful."
-    ),
-    "Fiverr gigs": (
-        "Service-oriented description: highlight offering, outcome, and a short CTA (message to order). "
-        "No hashtags."
-    ),
-}
-
-DEFAULT_PLATFORM_RULE = (
-    "Write in a clear, engaging way tailored to the selected platform. Follow the formatting toggles provided."
-)
-
 # ---------------------------------------------------------------------------
-# Sidebar Settings & Website Directory List
+# Sidebar Settings
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -184,46 +119,36 @@ with st.sidebar:
         "Model",
         [
             "openai/gpt-oss-120b",  # High intelligence replacement for 70B
-            
             "openai/gpt-oss-20b",   # Ultra-fast replacement for 8B
             "qwen/qwen3.6-27b",     # Highly balanced reasoning model
         ],
         index=0,
-        )
-    
+    )
+
     temperature = st.slider("Creativity (temperature)", 0.0, 1.5, 0.8, 0.1)
 
     st.markdown("---")
-    st.subheader("🖼️ Image generation engine")
-    # Stability AI option removed — only Mistral available now.
-    image_engine = st.radio(
-        "Which model should draw the image?",
-        ["Mistral (Agents API + Flux Ultra)"],
-        index=0,
-        help="Mistral's Agents API routes image creation through an image_generation connector, "
-             "producing high-quality visuals that align with the generated post text.",
-    )
+    st.subheader("🖼️ Image generation (Mistral)")
 
-    mistral_api_key = ""
-    mistral_image_model = "mistral-medium-latest"
-    if image_engine.startswith("Mistral"):
-        mistral_api_key = st.text_input(
-            "Mistral API Key",
-            value=os.environ.get("MISTRAL_API_KEY", ""),
-            type="password",
-            help="Get a key at https://console.mistral.ai. Required when the Mistral image engine is selected.",
-        )
-        mistral_image_model = st.selectbox(
-            "Mistral agent model",
-            ["mistral-medium-latest", "mistral-large-latest", "mistral-small-latest"],
-            index=0,
-            help="The LLM that drives the image-generation agent.",
-        )
+    mistral_api_key = st.text_input(
+        "Mistral API Key",
+        value=os.environ.get("MISTRAL_API_KEY", ""),
+        type="password",
+        help="Get a key at https://console.mistral.ai. Required whenever "
+             "you generate an image or video for a post.",
+    )
+    mistral_image_model = st.selectbox(
+        "Mistral agent model",
+        ["mistral-medium-latest", "mistral-large-latest", "mistral-small-latest"],
+        index=0,
+        help="The LLM that drives the image-generation agent.",
+    )
 
     st.caption(
-        "🖼️ The Mistral image tool needs a Mistral API key and bills through your Mistral account."
+        "🖼️ Image and video generation both run through Mistral's Agents "
+        "API (image_generation connector) and bill through your Mistral "
+        "account."
     )
-    
 
 img_col, title_col = st.columns([1, 4])
 with img_col:
@@ -238,14 +163,14 @@ with title_col:
 
 st.markdown("---")
 
-# Input Configuration Selectors (Fixed Column matching 3 vs 3)
+# Input Configuration Selectors
 col1, col2, col3 = st.columns(3)
 with col1:
     category = st.selectbox("Post type", CATEGORIES)
 with col2:
     tone = st.selectbox("Tone", TONES)
 with col3:
-    website = st.selectbox("Web platform target", WEBSITE, index=0) # Fixed typo 'seletbox'
+    website = st.selectbox("Web platform target", WEBSITE, index=0)
 
 topic = st.text_area(
     "Topic — what's the post about?",
@@ -253,7 +178,7 @@ topic = st.text_area(
     height=120,
 )
 
-# Output Style Controls (Fixed duplicate col3 variable naming conflicts)
+# Output Style Controls
 col_len, col_lang, col_opts = st.columns(3)
 with col_len:
     length = st.selectbox("Length", ["Short", "Medium", "Long"], index=1)
@@ -270,8 +195,8 @@ use_examples = st.checkbox(
     value=False,
 )
 
-# NEW FEATURE: generate multiple variants at once so the user can pick the
-# best one instead of re-rolling one-at-a-time.
+# Generate multiple variants at once so the user can pick the best one
+# instead of re-rolling one-at-a-time.
 num_variants = st.slider(
     "🧪 Number of variants to generate",
     min_value=1,
@@ -287,18 +212,19 @@ with img_toggle_col:
         "🎨 Also generate a matching image for this post",
         value=False,
         help="Creates an AI image sized for the selected platform, based on the "
-             "post's topic, tone, AND the actual generated post text — using "
-             "the Mistral agent.",
+             "post's topic, tone, AND the actual generated post text. When "
+             "generating multiple variants, the image is created for "
+             "whichever variant you select as the keeper.",
     )
 with vid_toggle_col:
     generate_video_toggle = st.checkbox(
         "🎬 Also generate a short video (image slideshow) for this post",
         value=False,
         help="Storyboards the post into a few scenes, generates an AI image "
-             "per scene with the same image engine, and stitches them into "
-             "a short Ken-Burns-style slideshow video sized for the "
-             "selected platform. Requires the 'moviepy' package "
-             "(pip install moviepy) and an ffmpeg binary on this machine.",
+             "per scene, and stitches them into a short Ken-Burns-style "
+             "slideshow video sized for the selected platform. Requires "
+             "the 'moviepy' package (pip install moviepy) and an ffmpeg "
+             "binary on this machine.",
     )
 
 if generate_video_toggle:
@@ -311,6 +237,7 @@ else:
     video_num_scenes = 3
     video_seconds_per_scene = 3
 
+
 def load_examples(category_name: str, n: int = 2):
     path = os.path.join(os.path.dirname(__file__), "linkedin_post_dataset.json")
     if not os.path.exists(path):
@@ -320,13 +247,13 @@ def load_examples(category_name: str, n: int = 2):
             data = json.load(f)
     except Exception:
         return []
-    
-    # Fixed matching bug: checking flat string sub-matches safely
+
     category_slug = category_name.lower()
     matches = [d for d in data if category_slug in d.get("category", "").lower()]
     if not matches:
         matches = data
     return matches[:n]
+
 
 LENGTH_MAP = {
     "Short": "under 80 words",
@@ -334,7 +261,6 @@ LENGTH_MAP = {
     "Long": "220-360 words",
 }
 
-# Fixed: System and User prompt configurations are streamlined to reference selected platform variable 
 SYSTEM_PROMPT = (
     "You are an expert copywriter and social media ghostwriter. You write authentic, engaging, "
     "human-sounding content tailored perfectly for the requested platform. Avoid generic corporate "
@@ -352,7 +278,6 @@ Formatting Rules:
 - Use clean layout patterns, short paragraphs, and distinct line breaks to maximize readability.
 - {emoji_instruction} 
 - {hashtag_instruction} 
-- Platform-specific guidance: {platform_rules}
 
 Core Content Context Topic:
 {topic}
@@ -360,6 +285,7 @@ Core Content Context Topic:
 {variant_instruction}
 
 {example_block}"""
+
 
 def build_chain(api_key: str, model: str, temperature: float):
     llm = ChatGroq(api_key=api_key, model=model, temperature=temperature)
@@ -394,7 +320,6 @@ def build_image_prompt(topic: str, category: str, tone: str, post_text: str = ""
     return prompt
 
 
-
 def get_mistral_image_agent(api_key: str, agent_model: str):
     """Create (once per session) a Mistral agent wired with the built-in
     image_generation connector, and cache its id so every image in this
@@ -425,15 +350,15 @@ def get_mistral_image_agent(api_key: str, agent_model: str):
     return client, st.session_state[cache_key]
 
 
-def generate_image_bytes_mistral(prompt: str, api_key: str, agent_model: str) -> bytes:
+def generate_image(prompt: str, mistral_key: str, mistral_model: str) -> bytes:
     """Generate an image via Mistral's Agents API (image_generation
     connector, Black Forest Labs FLUX1.1 [pro] Ultra under the hood).
     Mistral's image tool doesn't take explicit width/height - framing is
     steered through the prompt text instead. Returns raw image bytes."""
-    if not api_key:
-        raise ValueError("Mistral API key is required for this image engine.")
+    if not mistral_key:
+        raise ValueError("Mistral API key is required to generate images.")
 
-    client, agent_id = get_mistral_image_agent(api_key, agent_model)
+    client, agent_id = get_mistral_image_agent(mistral_key, mistral_model)
     response = client.beta.conversations.start(agent_id=agent_id, inputs=prompt)
 
     file_id = None
@@ -455,19 +380,13 @@ def generate_image_bytes_mistral(prompt: str, api_key: str, agent_model: str) ->
     return client.files.download(file_id=file_id).read()
 
 
-def generate_image(prompt: str, width: int, height: int, engine: str, mistral_key: str, mistral_model: str) -> bytes:
-    """Single entry point that routes to the selected engine (currently only Mistral)."""
-    # Only Mistral supported
-    return generate_image_bytes_mistral(prompt, mistral_key, mistral_model)
-
-
-def render_image_block(prompt: str, width: int, height: int, state_key: str, engine: str, mistral_key: str, mistral_model: str) -> None:
+def render_image_block(prompt: str, width: int, height: int, state_key: str, mistral_key: str, mistral_model: str) -> None:
     """Show the generated image (if any) for `state_key`, plus a
     regenerate button that rerolls."""
     if state_key in st.session_state:
         st.image(
             st.session_state[state_key],
-            caption=f"AI-generated image ({width}x{height}) · {engine.split(' ')[0]}",
+            caption=f"AI-generated image ({width}x{height}) · Mistral",
             use_container_width=True,
         )
         st.download_button(
@@ -480,30 +399,24 @@ def render_image_block(prompt: str, width: int, height: int, state_key: str, eng
     if st.button("🔁 Regenerate image", key=f"regen_{state_key}"):
         with st.spinner("Generating a new image..."):
             try:
-                st.session_state[state_key] = generate_image(
-                    prompt, width, height, engine, mistral_key, mistral_model
-                )
+                st.session_state[state_key] = generate_image(prompt, mistral_key, mistral_model)
                 st.rerun()
             except Exception as e:
                 st.error(f"Image generation failed: {e}")
 
 
 def _make_image_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                           image_engine: str, mistral_api_key: str, mistral_image_model: str) -> None:
+                           mistral_api_key: str, mistral_image_model: str) -> None:
     """Generate and attach a matching image to a history entry in-place."""
     img_width, img_height = PLATFORM_IMAGE_SIZE.get(website, (1080, 1080))
     aspect_label = _aspect_label(img_width, img_height)
     image_prompt = build_image_prompt(topic, category, tone, post_text, aspect_label)
     state_key = f"post_image_{len(st.session_state.history)}"
-    with st.spinner(f"Generating a matching image with {image_engine.split(' ')[0]}..."):
+    with st.spinner("Generating a matching image with Mistral..."):
         try:
-            st.session_state[state_key] = generate_image(
-                image_prompt, img_width, img_height,
-                image_engine, mistral_api_key, mistral_image_model,
-            )
+            st.session_state[state_key] = generate_image(image_prompt, mistral_api_key, mistral_image_model)
             history_entry["image_key"] = state_key
             history_entry["image_prompt"] = image_prompt
-            history_entry["image_engine"] = image_engine
         except Exception as e:
             st.error(f"Image generation failed: {e}")
 
@@ -511,9 +424,6 @@ def _make_image_for_entry(history_entry: dict, website: str, topic: str, categor
 # ---------------------------------------------------------------------------
 # Video generation (image-slideshow) helpers
 # ---------------------------------------------------------------------------
-import re
-
-
 def split_into_scenes(topic: str, post_text: str, n: int) -> list:
     """Break the topic + generated post copy into n rough scene
     descriptions, so each scene image is grounded in a different beat of
@@ -541,10 +451,12 @@ def split_into_scenes(topic: str, post_text: str, n: int) -> list:
     return scenes
 
 
-def generate_video_bytes(scene_prompts: list, width: int, height: int, image_engine: str,
+def generate_video_bytes(scene_prompts: list, width: int, height: int,
                           mistral_key: str, mistral_model: str, seconds_per_scene: int = 3,
                           fps: int = 24, status_cb=None) -> bytes:
-    """Generate one AI image per scene prompt (via the Mistral agent), then stitch them into an MP4 slideshow."""
+    """Generate one AI image per scene prompt (via Mistral), then stitch
+    them into an MP4 slideshow with a gentle Ken-Burns zoom and a
+    cross-fade between scenes. Returns raw MP4 bytes."""
     try:
         from moviepy.editor import ImageClip, concatenate_videoclips, vfx
     except ImportError as exc:
@@ -564,7 +476,7 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int, image_eng
     for i, scene_prompt in enumerate(scene_prompts):
         if status_cb:
             status_cb(f"Generating scene {i + 1}/{len(scene_prompts)}...")
-        img_bytes = generate_image(scene_prompt, width, height, image_engine, mistral_key, mistral_model)
+        img_bytes = generate_image(scene_prompt, mistral_key, mistral_model)
         frame = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((width, height)))
 
         clip = ImageClip(frame).set_duration(seconds_per_scene)
@@ -599,7 +511,7 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int, image_eng
 
 
 def _make_video_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                           image_engine: str, mistral_api_key: str, mistral_image_model: str,
+                           mistral_api_key: str, mistral_image_model: str,
                            num_scenes: int, seconds_per_scene: int) -> None:
     """Storyboard the post into scenes, generate a scene image for each,
     stitch them into a slideshow video, and attach it to a history entry."""
@@ -613,14 +525,13 @@ def _make_video_for_entry(history_entry: dict, website: str, topic: str, categor
     status_box = st.empty()
     try:
         video_bytes = generate_video_bytes(
-            scene_prompts, vid_width, vid_height, image_engine,
+            scene_prompts, vid_width, vid_height,
             mistral_api_key, mistral_image_model, seconds_per_scene=seconds_per_scene,
             status_cb=lambda msg: status_box.info(f"🎬 {msg}"),
         )
         st.session_state[state_key] = video_bytes
         history_entry["video_key"] = state_key
         history_entry["video_scenes"] = scenes
-        history_entry["image_engine_for_video"] = image_engine
     except Exception as e:
         st.error(f"Video generation failed: {e}")
     finally:
@@ -653,7 +564,7 @@ if generate:
     elif not topic.strip():
         st.error("Please describe what the post should be about.")
     elif (generate_image_toggle or generate_video_toggle) and not mistral_api_key:
-        st.error("Please enter your Mistral API key in the sidebar to generate images or videos.")
+        st.error("Please enter your Mistral API key in the sidebar to generate images or video.")
     else:
         emoji_instruction = (
             "Include a few relevant emojis, used sparingly." if use_emojis else "Do not use any emojis."
@@ -661,7 +572,7 @@ if generate:
         hashtag_instruction = (
             "End with 3-5 relevant hashtags." if use_hashtags else "Do not include hashtags."
         )
-        
+
         example_block = ""
         if use_examples:
             examples = load_examples(category)
@@ -671,7 +582,7 @@ if generate:
                     "Here are a couple of example posts in a similar style for reference "
                     "(do not copy them, just match the tone and structure):\n\n" + joined
                 )
-        
+
         try:
             chain = build_chain(api_key, model, temperature)
             variants = []
@@ -682,8 +593,6 @@ if generate:
                     variant_instruction = (
                         VARIANT_ANGLES[i % len(VARIANT_ANGLES)] if num_variants > 1 else ""
                     )
-                    # Inject platform-specific guidance into the prompt variables.
-                    platform_rules = PLATFORM_PROMPT_OVERRIDES.get(website, DEFAULT_PLATFORM_RULE)
                     post_text = chain.invoke(
                         {
                             "website": website,
@@ -696,7 +605,6 @@ if generate:
                             "topic": topic,
                             "variant_instruction": variant_instruction,
                             "example_block": example_block,
-                            "platform_rules": platform_rules,
                         }
                     )
                     variants.append(post_text)
@@ -713,7 +621,6 @@ if generate:
                 "generate_video_toggle": generate_video_toggle,
                 "video_num_scenes": video_num_scenes,
                 "video_seconds_per_scene": video_seconds_per_scene,
-                "image_engine": image_engine,
                 "mistral_api_key": mistral_api_key,
                 "mistral_image_model": mistral_image_model,
             }
@@ -748,13 +655,13 @@ if st.session_state.pending_variants:
         if cfg["generate_image_toggle"]:
             _make_image_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
-                chosen_text, cfg["image_engine"], cfg["mistral_api_key"], cfg["mistral_image_model"],
+                chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"],
             )
 
         if cfg.get("generate_video_toggle"):
             _make_video_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
-                chosen_text, cfg["image_engine"], cfg["mistral_api_key"], cfg["mistral_image_model"],
+                chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"],
                 cfg["video_num_scenes"], cfg["video_seconds_per_scene"],
             )
 
