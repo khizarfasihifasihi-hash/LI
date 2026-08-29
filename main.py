@@ -510,6 +510,28 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int,
     return video_bytes
 
 
+def render_video_block(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
+                        mistral_key: str, mistral_model: str, num_scenes: int, seconds_per_scene: int) -> None:
+    """Show the generated video (if any) for a history entry, plus a
+    regenerate button that reroles the whole scene set."""
+    video_key = history_entry.get("video_key")
+    if video_key and video_key in st.session_state:
+        st.video(st.session_state[video_key])
+        st.download_button(
+            "⬇️ Download video",
+            data=st.session_state[video_key],
+            file_name=f"{video_key}.mp4",
+            mime="video/mp4",
+            key=f"dl_{video_key}",
+        )
+    if st.button("🔁 Regenerate video", key=f"regen_video_{video_key or id(history_entry)}"):
+        _make_video_for_entry(
+            history_entry, website, topic, category, tone, post_text,
+            mistral_key, mistral_model, num_scenes, seconds_per_scene,
+        )
+        st.rerun()
+
+
 def _make_video_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
                            mistral_api_key: str, mistral_image_model: str,
                            num_scenes: int, seconds_per_scene: int) -> None:
@@ -650,7 +672,15 @@ if st.session_state.pending_variants:
                     use_clicked = True
 
     if use_clicked and chosen_text:
-        history_entry = {"platform": cfg["website"], "content": chosen_text, "image_key": None, "video_key": None}
+        history_entry = {
+            "platform": cfg["website"],
+            "content": chosen_text,
+            "topic": cfg["topic"],
+            "category": cfg["category"],
+            "tone": cfg["tone"],
+            "image_key": None,
+            "video_key": None,
+        }
 
         if cfg["generate_image_toggle"]:
             _make_image_for_entry(
@@ -678,23 +708,32 @@ if st.session_state.history:
         real_idx = len(st.session_state.history) - idx
         with st.expander(f"Post {real_idx} - Platform: {historical_post['platform']}"):
             st.code(historical_post['content'], language="text")
+
             image_key = historical_post.get("image_key")
-            if image_key and image_key in st.session_state:
-                st.image(st.session_state[image_key], use_container_width=True)
-                st.download_button(
-                    "⬇️ Download image",
-                    data=st.session_state[image_key],
-                    file_name=f"{image_key}.jpg",
-                    mime="image/jpeg",
-                    key=f"dl_history_{image_key}",
+            image_prompt = historical_post.get("image_prompt")
+            if image_key or image_prompt:
+                img_width, img_height = PLATFORM_IMAGE_SIZE.get(historical_post["platform"], (1080, 1080))
+                if not image_key:
+                    image_key = f"post_image_hist_{real_idx}"
+                if not image_prompt:
+                    aspect_label = _aspect_label(img_width, img_height)
+                    image_prompt = build_image_prompt(
+                        historical_post.get("topic", ""), historical_post.get("category", ""),
+                        historical_post.get("tone", ""), historical_post["content"], aspect_label,
+                    )
+                render_image_block(
+                    image_prompt, img_width, img_height, image_key,
+                    mistral_api_key, mistral_image_model,
                 )
+                historical_post["image_key"] = image_key
+                historical_post["image_prompt"] = image_prompt
+
             video_key = historical_post.get("video_key")
             if video_key and video_key in st.session_state:
-                st.video(st.session_state[video_key])
-                st.download_button(
-                    "⬇️ Download video",
-                    data=st.session_state[video_key],
-                    file_name=f"{video_key}.mp4",
-                    mime="video/mp4",
-                    key=f"dl_history_{video_key}",
+                render_video_block(
+                    historical_post, historical_post["platform"],
+                    historical_post.get("topic", ""), historical_post.get("category", ""),
+                    historical_post.get("tone", ""), historical_post["content"],
+                    mistral_api_key, mistral_image_model,
+                    video_num_scenes, video_seconds_per_scene,
                 )
