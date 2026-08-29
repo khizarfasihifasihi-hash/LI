@@ -92,7 +92,7 @@ PLATFORM_VIDEO_SIZE = {
 }
 
 # Rough aspect-ratio label per platform, used only to *describe* the desired
-# framing to Mistral's image tool (which - unlike Pollinations - doesn't take
+# framing to the image tool (which - unlike Pollinations - doesn't take
 # explicit width/height parameters, only prompt text).
 def _aspect_label(width: int, height: int) -> str:
     ratio = width / height
@@ -133,15 +133,27 @@ with st.sidebar:
     st.subheader("🖼️ Image generation engine")
     image_engine = st.radio(
         "Which model should draw the image?",
-        ["Pollinations.ai (free, no key)", "Mistral (Agents API + Flux Ultra)"],
+        ["Stability AI (Stable Diffusion 3.5)", "Mistral (Agents API + Flux Ultra)"],
         index=0,
-        help="Pollinations is a free keyless image API. The Mistral option "
+        help="Stability AI offers high-quality Stable Diffusion models. The Mistral option "
              "routes image creation through Mistral's own Agents API "
              "(image_generation tool, Black Forest Labs FLUX1.1 [pro] Ultra) "
              "using the SAME post-writing context, so text and image come "
              "from one connected pipeline.",
     )
+    
+    stability_api_key = ""
+    if image_engine.startswith("Stability"):
+        stability_api_key = st.text_input(
+            "Stability AI API Key",
+            value=os.environ.get("STABILITY_API_KEY", ""),
+            type="password",
+            help="Get a key at https://platform.stability.ai/account/api-keys. "
+                 "Required when using Stability AI image engine.",
+        )
+    
     mistral_api_key = ""
+    mistral_image_model = "mistral-medium-latest"
     if image_engine.startswith("Mistral"):
         mistral_api_key = st.text_input(
             "Mistral API Key",
@@ -156,11 +168,9 @@ with st.sidebar:
             index=0,
             help="The LLM that drives the image-generation agent.",
         )
-    else:
-        mistral_image_model = "mistral-medium-latest"
 
     st.caption(
-        "🖼️ Pollinations.ai needs no key. Mistral's image tool needs a "
+        "🖼️ Stability AI requires an API key. Mistral's image tool needs a "
         "Mistral API key and bills through your Mistral account."
     )
     
@@ -335,20 +345,26 @@ def build_image_prompt(topic: str, category: str, tone: str, post_text: str = ""
     return prompt
 
 
-def generate_image_bytes(prompt: str, width: int, height: int) -> bytes:
-    """Generate an image from a text prompt using Pollinations' free,
-    keyless image API (https://image.pollinations.ai). Returns raw image
-    bytes (or raises on failure/timeout, which the caller should catch)."""
-    params = {
-        "width": width,
-        "height": height,
-        "seed": random.randint(1, 999_999_999),
-        "nologo": "true",
-        "model": "flux",
+def generate_image_bytes_stability(prompt: str, width: int, height: int, api_key: str) -> bytes:
+    """Generate an image from a text prompt using Stability AI's API.
+    Returns raw image bytes (or raises on failure/timeout, which the caller should catch)."""
+    if not api_key:
+        raise ValueError("Stability AI API key is required for this image engine.")
+    
+    url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "image/jpeg",
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?{query}"
-    response = requests.get(url, timeout=90)
+    
+    files = {
+        "prompt": (None, prompt),
+        "output_format": (None, "jpeg"),
+        "model": (None, "sd3.5-large"),
+    }
+    
+    response = requests.post(url, headers=headers, files=files, timeout=90)
     response.raise_for_status()
     return response.content
 
@@ -413,18 +429,17 @@ def generate_image_bytes_mistral(prompt: str, api_key: str, agent_model: str) ->
     return client.files.download(file_id=file_id).read()
 
 
-def generate_image(prompt: str, width: int, height: int, engine: str, mistral_key: str, mistral_model: str) -> bytes:
+def generate_image(prompt: str, width: int, height: int, engine: str, stability_key: str, mistral_key: str, mistral_model: str) -> bytes:
     """Single entry point that routes to whichever engine is selected in
     the sidebar, so the rest of the app doesn't need to branch on it."""
     if engine.startswith("Mistral"):
         return generate_image_bytes_mistral(prompt, mistral_key, mistral_model)
-    return generate_image_bytes(prompt, width, height)
+    return generate_image_bytes_stability(prompt, width, height, stability_key)
 
 
-def render_image_block(prompt: str, width: int, height: int, state_key: str, engine: str, mistral_key: str, mistral_model: str) -> None:
+def render_image_block(prompt: str, width: int, height: int, state_key: str, engine: str, stability_key: str, mistral_key: str, mistral_model: str) -> None:
     """Show the generated image (if any) for `state_key`, plus a
-    regenerate button that rerolls (fresh random seed for Pollinations,
-    fresh agent turn for Mistral)."""
+    regenerate button that rerolls."""
     if state_key in st.session_state:
         st.image(
             st.session_state[state_key],
@@ -442,7 +457,7 @@ def render_image_block(prompt: str, width: int, height: int, state_key: str, eng
         with st.spinner("Generating a new image..."):
             try:
                 st.session_state[state_key] = generate_image(
-                    prompt, width, height, engine, mistral_key, mistral_model
+                    prompt, width, height, engine, stability_key, mistral_key, mistral_model
                 )
                 st.rerun()
             except Exception as e:
@@ -450,7 +465,7 @@ def render_image_block(prompt: str, width: int, height: int, state_key: str, eng
 
 
 def _make_image_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                           image_engine: str, mistral_api_key: str, mistral_image_model: str) -> None:
+                           image_engine: str, stability_api_key: str, mistral_api_key: str, mistral_image_model: str) -> None:
     """Generate and attach a matching image to a history entry in-place."""
     img_width, img_height = PLATFORM_IMAGE_SIZE.get(website, (1080, 1080))
     aspect_label = _aspect_label(img_width, img_height)
@@ -460,7 +475,7 @@ def _make_image_for_entry(history_entry: dict, website: str, topic: str, categor
         try:
             st.session_state[state_key] = generate_image(
                 image_prompt, img_width, img_height,
-                image_engine, mistral_api_key, mistral_image_model,
+                image_engine, stability_api_key, mistral_api_key, mistral_image_model,
             )
             history_entry["image_key"] = state_key
             history_entry["image_prompt"] = image_prompt
@@ -503,7 +518,7 @@ def split_into_scenes(topic: str, post_text: str, n: int) -> list:
 
 
 def generate_video_bytes(scene_prompts: list, width: int, height: int, image_engine: str,
-                          mistral_key: str, mistral_model: str, seconds_per_scene: int = 3,
+                          stability_key: str, mistral_key: str, mistral_model: str, seconds_per_scene: int = 3,
                           fps: int = 24, status_cb=None) -> bytes:
     """Generate one AI image per scene prompt (via whichever image engine is
     selected), then stitch them into an MP4 slideshow with a gentle
@@ -527,7 +542,7 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int, image_eng
     for i, scene_prompt in enumerate(scene_prompts):
         if status_cb:
             status_cb(f"Generating scene {i + 1}/{len(scene_prompts)}...")
-        img_bytes = generate_image(scene_prompt, width, height, image_engine, mistral_key, mistral_model)
+        img_bytes = generate_image(scene_prompt, width, height, image_engine, stability_key, mistral_key, mistral_model)
         frame = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((width, height)))
 
         clip = ImageClip(frame).set_duration(seconds_per_scene)
@@ -562,7 +577,7 @@ def generate_video_bytes(scene_prompts: list, width: int, height: int, image_eng
 
 
 def _make_video_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                           image_engine: str, mistral_api_key: str, mistral_image_model: str,
+                           image_engine: str, stability_api_key: str, mistral_api_key: str, mistral_image_model: str,
                            num_scenes: int, seconds_per_scene: int) -> None:
     """Storyboard the post into scenes, generate a scene image for each,
     stitch them into a slideshow video, and attach it to a history entry."""
@@ -577,7 +592,7 @@ def _make_video_for_entry(history_entry: dict, website: str, topic: str, categor
     try:
         video_bytes = generate_video_bytes(
             scene_prompts, vid_width, vid_height, image_engine,
-            mistral_api_key, mistral_image_model, seconds_per_scene=seconds_per_scene,
+            stability_api_key, mistral_api_key, mistral_image_model, seconds_per_scene=seconds_per_scene,
             status_cb=lambda msg: status_box.info(f"🎬 {msg}"),
         )
         st.session_state[state_key] = video_bytes
@@ -615,8 +630,10 @@ if generate:
         st.error("Please enter your Groq API key in the sidebar (or set GROQ_API_KEY).")
     elif not topic.strip():
         st.error("Please describe what the post should be about.")
+    elif (generate_image_toggle or generate_video_toggle) and image_engine.startswith("Stability") and not stability_api_key:
+        st.error("Please enter your Stability AI API key in the sidebar, or switch to the Mistral image engine.")
     elif (generate_image_toggle or generate_video_toggle) and image_engine.startswith("Mistral") and not mistral_api_key:
-        st.error("Please enter your Mistral API key in the sidebar, or switch to the Pollinations image engine.")
+        st.error("Please enter your Mistral API key in the sidebar, or switch to the Stability AI image engine.")
     else:
         emoji_instruction = (
             "Include a few relevant emojis, used sparingly." if use_emojis else "Do not use any emojis."
@@ -674,6 +691,7 @@ if generate:
                 "video_num_scenes": video_num_scenes,
                 "video_seconds_per_scene": video_seconds_per_scene,
                 "image_engine": image_engine,
+                "stability_api_key": stability_api_key,
                 "mistral_api_key": mistral_api_key,
                 "mistral_image_model": mistral_image_model,
             }
@@ -708,13 +726,13 @@ if st.session_state.pending_variants:
         if cfg["generate_image_toggle"]:
             _make_image_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
-                chosen_text, cfg["image_engine"], cfg["mistral_api_key"], cfg["mistral_image_model"],
+                chosen_text, cfg["image_engine"], cfg["stability_api_key"], cfg["mistral_api_key"], cfg["mistral_image_model"],
             )
 
         if cfg.get("generate_video_toggle"):
             _make_video_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
-                chosen_text, cfg["image_engine"], cfg["mistral_api_key"], cfg["mistral_image_model"],
+                chosen_text, cfg["image_engine"], cfg["stability_api_key"], cfg["mistral_api_key"], cfg["mistral_image_model"],
                 cfg["video_num_scenes"], cfg["video_seconds_per_scene"],
             )
 
