@@ -70,6 +70,7 @@ PLATFORM_IMAGE_SIZE = {
     "Discord": (1200, 675),
     "Whatsapp": (1080, 1080),
     "Telegram": (1080, 1080),
+    "Fiverr gigs": (1200, 630),
 }
 
 # Default video canvas per platform - vertical for short-form/story
@@ -89,6 +90,7 @@ PLATFORM_VIDEO_SIZE = {
     "Discord": (1280, 720),
     "Whatsapp": (1080, 1920),
     "Telegram": (1080, 1920),
+    "Fiverr gigs": (1280, 720),
 }
 
 # Rough aspect-ratio label per platform, used only to *describe* the desired
@@ -102,6 +104,68 @@ def _aspect_label(width: int, height: int) -> str:
         return "landscape / horizontal, wide format"
     return "portrait / vertical, tall format"
 
+
+# Per-platform formatting rules that influence the LLM's output style.
+PLATFORM_PROMPT_OVERRIDES = {
+    "Linkedin": (
+        "Focus on professional polish: 2-3 short paragraphs, one clear call-to-action, "
+        "avoid more than 2 hashtags and use emojis sparingly. Use formal/professional language."
+    ),
+    "Facebook": (
+        "Casual and friendly, 1-2 short paragraphs, 1-3 hashtags allowed, "
+        "use emojis moderately and include a simple CTA (comment or share)."
+    ),
+    "Instagram": (
+        "Short punchy caption with a hook, use emojis and 3-5 hashtags at the end, "
+        "include a CTA (save/share/follow). Use line breaks for readability."
+    ),
+    "X (Twitter)": (
+        "Very short, punchy, under 280 characters. Prefer snappy one-liners, include 1-3 hashtags, "
+        "and 0-2 emojis. If relevant, suggest @mentions."
+    ),
+    "Youtube": (
+        "Longer community post or video description style. Include a short summary, a CTA, "
+        "and a suggested link placeholder. Hashtags optional."
+    ),
+    "Threads": (
+        "Short conversational thread-style post: a strong hook and 2-4 short lines, "
+        "use emojis and 2-3 hashtags."
+    ),
+    "Tiktok": (
+        "Very short caption focused on trends/call-to-action, include 3-6 hashtags and emojis, "
+        "use casual energetic language."
+    ),
+    "Snapchat": (
+        "Brief and casual, heavy emoji acceptance, no hashtags. Keep it immediate and personal."
+    ),
+    "Pinterest": (
+        "Descriptive and keyword-rich caption for discoverability. Include 2-4 hashtags."
+    ),
+    "Reddit": (
+        "Conversational and community-aware. Avoid cross-promotion, no hashtags, "
+        "prefer longer explanations where appropriate and a neutral tone."
+    ),
+    "Quora": (
+        "Informative, long-form answer-like post. No hashtags. Focus on clarity and helpfulness."
+    ),
+    "Discord": (
+        "Short announcement or message, mention roles or links as needed, minimal emojis."
+    ),
+    "Whatsapp": (
+        "Very short, personal message style. No hashtags, casual tone, use emojis sparingly."
+    ),
+    "Telegram": (
+        "Short-to-medium announcement style, include links and 1-2 hashtags if helpful."
+    ),
+    "Fiverr gigs": (
+        "Service-oriented description: highlight offering, outcome, and a short CTA (message to order). "
+        "No hashtags."
+    ),
+}
+
+DEFAULT_PLATFORM_RULE = (
+    "Write in a clear, engaging way tailored to the selected platform. Follow the formatting toggles provided."
+)
 
 # ---------------------------------------------------------------------------
 # Sidebar Settings & Website Directory List
@@ -304,6 +368,7 @@ Formatting Rules:
 - Use clean layout patterns, short paragraphs, and distinct line breaks to maximize readability.
 - {emoji_instruction} 
 - {hashtag_instruction} 
+- Platform-specific guidance: {platform_rules}
 
 Core Content Context Topic:
 {topic}
@@ -343,7 +408,6 @@ def build_image_prompt(topic: str, category: str, tone: str, post_text: str = ""
     if aspect_label:
         prompt += f" Composition/framing: {aspect_label}."
     return prompt
-
 
 
 
@@ -641,6 +705,8 @@ if generate:
                     variant_instruction = (
                         VARIANT_ANGLES[i % len(VARIANT_ANGLES)] if num_variants > 1 else ""
                     )
+                    # Inject platform-specific guidance into the prompt variables.
+                    platform_rules = PLATFORM_PROMPT_OVERRIDES.get(website, DEFAULT_PLATFORM_RULE)
                     post_text = chain.invoke(
                         {
                             "website": website,
@@ -653,6 +719,7 @@ if generate:
                             "topic": topic,
                             "variant_instruction": variant_instruction,
                             "example_block": example_block,
+                            "platform_rules": platform_rules,
                         }
                     )
                     variants.append(post_text)
