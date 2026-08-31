@@ -19,6 +19,9 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Expanded Option Lists
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Expanded Option Lists (upgraded)
+# ---------------------------------------------------------------------------
 CATEGORIES = [
     "Posting on Website",
     "Hiring me", "New job announcement", "Work anniversary", "Achievement/milestone",
@@ -35,11 +38,22 @@ CATEGORIES = [
     "Limited-time offer", "Product bundle deal", "Customer review/testimonial highlight",
     "Unboxing/first look", "How-to / product tutorial", "Before & after", "Seasonal collection drop",
     "Gift guide", "Comparison (this vs that)", "FAQ / product Q&A", "Out of stock / back-order notice",
-    # --- more general categories ---
+    "Pre-order announcement", "Waitlist announcement", "Price drop announcement",
+    "Shipping delay notice", "Return/refund policy update",
+    # --- general / engagement ---
     "Poll/question to audience", "This or that", "Fun fact / trivia", "Motivational quote",
     "Holiday/seasonal greeting", "Company milestone (revenue, users, years in business)",
     "Partnership/collaboration announcement", "Recruitment drive", "Internship program announcement",
     "Community shoutout", "User-generated content repost", "Apology/service update",
+    # --- newly added ---
+    "Repost/share with commentary", "AMA (Ask Me Anything)", "Live event coverage",
+    "Year in review", "Prediction/forecast post", "Controversial/hot take opinion piece",
+    "New feature announcement", "Bug fix / changelog update", "Open source release",
+    "Job vacancy detail post", "Employee spotlight", "Company culture post",
+    "Sustainability/CSR update", "Charity/donation drive", "Survey results share",
+    "Interview highlights", "Podcast episode promo", "Newsletter signup push",
+    "Loyalty program announcement", "Referral program push", "App update / new version release",
+    "Customer support tip", "Success metrics/KPI share", "Meme/relatable content",
 ]
 
 TONES = [
@@ -49,6 +63,10 @@ TONES = [
     "Playful & quirky", "Luxurious & aspirational", "Minimal & understated", "Warm & conversational",
     "Sarcastic/deadpan", "Nostalgic", "Data-driven & analytical", "Reassuring & trustworthy",
     "Edgy & rebellious", "Celebratory",
+    # --- newly added ---
+    "Formal & corporate", "Poetic/lyrical", "Direct & no-nonsense", "Curious & exploratory",
+    "Encouraging & supportive", "Witty & clever", "Grateful & humble", "Confident & assertive",
+    "Relatable & down-to-earth", "Futuristic & visionary", "Calm & mindful", "Punchy & headline-style",
 ]
 
 LANGUAGES = [
@@ -57,6 +75,11 @@ LANGUAGES = [
     "Indonesia", "Russian", "Persian",
     "Italian", "Chinese (Simplified)", "Japanese", "Korean", "Bengali", "Punjabi",
     "Pashto", "Sindhi", "Dutch", "Swahili", "Vietnamese", "Thai", "Polish", "Greek", "Hebrew",
+    # --- newly added ---
+    "Chinese (Traditional)", "Malay", "Filipino/Tagalog", "Ukrainian", "Romanian", "Czech",
+    "Swedish", "Norwegian", "Danish", "Finnish", "Hungarian", "Amharic", "Hausa", "Yoruba",
+    "Zulu", "Nepali", "Sinhala", "Burmese", "Khmer", "Lao", "Mongolian", "Kazakh",
+    "Azerbaijani", "Georgian", "Armenian", "Slovak", "Bulgarian", "Serbian", "Croatian",
 ]
 
 WEBSITE = [
@@ -65,11 +88,13 @@ WEBSITE = [
     "Quora", "Discord", "Whatsapp", "Telegram", "Fiverr gigs",
     "Etsy shop update", "Shopify/store announcement", "Amazon listing blurb",
     "Medium", "Substack/Newsletter", "Google Business Profile", "Upwork profile/proposal",
+    # --- newly added ---
+    "Bluesky", "Mastodon", "BeReal", "Twitch", "Vimeo", "Behance", "Dribbble",
+    "GitHub README/profile", "Product Hunt launch post", "AngelList/Wellfound",
+    "Nextdoor", "Line", "Clubhouse",
 ]
 
-# Sensible default image canvas per platform - a square Instagram crop and a
-# vertical TikTok crop need very different dimensions, so pick a size that
-# matches how each platform actually displays images.
+# Sensible default image canvas per platform.
 PLATFORM_IMAGE_SIZE = {
     "Linkedin": (1200, 627),
     "Facebook": (1200, 630),
@@ -85,10 +110,19 @@ PLATFORM_IMAGE_SIZE = {
     "Discord": (1200, 675),
     "Whatsapp": (1080, 1080),
     "Telegram": (1080, 1080),
+    # --- newly added ---
+    "Bluesky": (1200, 675),
+    "Mastodon": (1200, 630),
+    "BeReal": (1080, 1920),
+    "Twitch": (1280, 720),
+    "Vimeo": (1280, 720),
+    "Behance": (1400, 1050),
+    "Dribbble": (1600, 1200),
+    "Product Hunt launch post": (1270, 760),
+    "Nextdoor": (1200, 630),
 }
 
-# Default video canvas per platform - vertical for short-form/story
-# platforms, landscape for Youtube, square as a safe fallback elsewhere.
+# Default video canvas per platform.
 PLATFORM_VIDEO_SIZE = {
     "Linkedin": (1280, 720),
     "Facebook": (1280, 720),
@@ -104,8 +138,15 @@ PLATFORM_VIDEO_SIZE = {
     "Discord": (1280, 720),
     "Whatsapp": (1080, 1920),
     "Telegram": (1080, 1920),
+    # --- newly added ---
+    "Bluesky": (1280, 720),
+    "Mastodon": (1280, 720),
+    "BeReal": (1080, 1920),
+    "Twitch": (1920, 1080),
+    "Vimeo": (1920, 1080),
+    "Product Hunt launch post": (1280, 720),
+    "Nextdoor": (1280, 720),
 }
-
 
 def _aspect_label(width: int, height: int) -> str:
     """Rough aspect-ratio label per platform, used only to *describe* the
