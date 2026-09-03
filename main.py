@@ -1,6 +1,5 @@
 import os
 import json
-import re
 
 import streamlit as st
 from langchain_groq import ChatGroq
@@ -226,7 +225,7 @@ CATEGORIES = [
     'End of year thank you post',
     'New Year kickoff post',
 ]
- 
+
 
 TONES = [
     'Professional',
@@ -490,7 +489,7 @@ LANGUAGES = [
     ("Zhuang", "za"),
     ("Zulu", "zu"),
 ]
- 
+
 
 WEBSITE = [
     'Linkedin',
@@ -635,31 +634,6 @@ PLATFORM_IMAGE_SIZE = {
     "Nextdoor": (1200, 630),
 }
 
-# Default video canvas per platform.
-PLATFORM_VIDEO_SIZE = {
-    "Linkedin": (1280, 720),
-    "Facebook": (1280, 720),
-    "Instagram": (1080, 1920),
-    "Youtube": (1920, 1080),
-    "X (Twitter)": (1280, 720),
-    "Threads": (1080, 1920),
-    "Tiktok": (1080, 1920),
-    "Snapchat": (1080, 1920),
-    "Pinterest": (1080, 1920),
-    "Reddit": (1280, 720),
-    "Quora": (1280, 720),
-    "Discord": (1280, 720),
-    "Whatsapp": (1080, 1920),
-    "Telegram": (1080, 1920),
-    # --- newly added ---
-    "Bluesky": (1280, 720),
-    "Mastodon": (1280, 720),
-    "BeReal": (1080, 1920),
-    "Twitch": (1920, 1080),
-    "Vimeo": (1920, 1080),
-    "Product Hunt launch post": (1280, 720),
-    "Nextdoor": (1280, 720),
-}
 
 def _aspect_label(width: int, height: int) -> str:
     """Rough aspect-ratio label per platform, used only to *describe* the
@@ -706,7 +680,7 @@ with st.sidebar:
         value=os.environ.get("MISTRAL_API_KEY", ""),
         type="password",
         help="Get a key at https://console.mistral.ai. Required whenever "
-             "you generate an image or video for a post.",
+             "you generate an image for a post.",
     )
     mistral_image_model = st.selectbox(
         "Mistral agent model",
@@ -716,8 +690,8 @@ with st.sidebar:
     )
 
     st.caption(
-        "🖼️ Image and video generation both run through Mistral's Agents "
-        "API (image_generation connector) and bill through your Mistral "
+        "🖼️ Image generation runs through Mistral's Agents API "
+        "(image_generation connector) and bills through your Mistral "
         "account."
     )
 
@@ -796,36 +770,14 @@ num_variants = st.slider(
          "shown side-by-side in tabs, and pick your favorite.",
 )
 
-img_toggle_col, vid_toggle_col = st.columns(2)
-with img_toggle_col:
-    generate_image_toggle = st.checkbox(
-        "🎨 Also generate a matching image for this post",
-        value=False,
-        help="Creates an AI image sized for the selected platform, based on the "
-             "post's topic, tone, AND the actual generated post text. When "
-             "generating multiple variants, the image is created for "
-             "whichever variant you select as the keeper.",
-    )
-with vid_toggle_col:
-    generate_video_toggle = st.checkbox(
-        "🎬 Also generate a short video (image slideshow) for this post",
-        value=False,
-        help="Storyboards the post into a few scenes, generates an AI image "
-             "per scene, and stitches them into a short Ken-Burns-style "
-             "slideshow video sized for the selected platform. Requires "
-             "the 'moviepy' package (pip install moviepy) and an ffmpeg "
-             "binary on this machine.",
-    )
-
-if generate_video_toggle:
-    vid_scene_col, vid_dur_col = st.columns(2)
-    with vid_scene_col:
-        video_num_scenes = st.slider("Number of video scenes", 2, 5, 3)
-    with vid_dur_col:
-        video_seconds_per_scene = st.slider("Seconds per scene", 2, 6, 3)
-else:
-    video_num_scenes = 3
-    video_seconds_per_scene = 3
+generate_image_toggle = st.checkbox(
+    "🎨 Also generate a matching image for this post",
+    value=False,
+    help="Creates an AI image sized for the selected platform, based on the "
+         "post's topic, tone, AND the actual generated post text. When "
+         "generating multiple variants, the image is created for "
+         "whichever variant you select as the keeper.",
+)
 
 
 def build_product_block(name: str, price: str, features: str) -> str:
@@ -1037,152 +989,6 @@ def _make_image_for_entry(history_entry: dict, website: str, topic: str, categor
 
 
 # ---------------------------------------------------------------------------
-# Video generation (image-slideshow) helpers
-# ---------------------------------------------------------------------------
-def split_into_scenes(topic: str, post_text: str, n: int) -> list:
-    """Break the topic + generated post copy into n rough scene
-    descriptions, so each scene image is grounded in a different beat of
-    the story instead of every scene illustrating the same single idea."""
-    combined = f"{topic.strip()}. {post_text.strip()}".strip(". ")
-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", combined) if s.strip()]
-    if not sentences:
-        sentences = [topic.strip() or post_text.strip() or "the post topic"]
-
-    if len(sentences) <= n:
-        # Pad by repeating/splitting the topic so we always return n scenes.
-        scenes = sentences[:]
-        while len(scenes) < n:
-            scenes.append(sentences[len(scenes) % len(sentences)])
-        return scenes[:n]
-
-    # Distribute sentences across n roughly-equal groups, in order.
-    chunk_size = max(1, len(sentences) // n)
-    scenes = []
-    for i in range(n):
-        start = i * chunk_size
-        end = (start + chunk_size) if i < n - 1 else len(sentences)
-        group = sentences[start:end] or [sentences[-1]]
-        scenes.append(" ".join(group))
-    return scenes
-
-
-def generate_video_bytes(scene_prompts: list, width: int, height: int,
-                          mistral_key: str, mistral_model: str, seconds_per_scene: int = 3,
-                          fps: int = 24, status_cb=None) -> bytes:
-    """Generate one AI image per scene prompt (via Mistral), then stitch
-    them into an MP4 slideshow with a gentle Ken-Burns zoom and a
-    cross-fade between scenes. Returns raw MP4 bytes."""
-    try:
-        from moviepy import ImageClip, concatenate_videoclips, vfx
-    except ImportError as exc:
-        raise RuntimeError(
-            "Video generation needs the 'moviepy' package (v2.x) and an "
-            "ffmpeg binary installed on this machine. Install with: "
-            "pip install moviepy"
-        ) from exc
-
-    import io
-    import tempfile
-
-    import numpy as np
-    from PIL import Image
-
-    fade_seconds = min(0.6, seconds_per_scene / 3)
-
-    clips = []
-    for i, scene_prompt in enumerate(scene_prompts):
-        if status_cb:
-            status_cb(f"Generating scene {i + 1}/{len(scene_prompts)}...")
-        img_bytes = generate_image(scene_prompt, mistral_key, mistral_model)
-        frame = np.array(Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((width, height)))
-
-        clip = ImageClip(frame).with_duration(seconds_per_scene)
-        # Subtle Ken-Burns zoom so a static image doesn't feel like a slide,
-        # plus a cross-fade as each scene enters.
-        clip = clip.with_effects([
-            vfx.Resize(lambda t: 1.0 + 0.04 * (t / seconds_per_scene)),
-            vfx.CrossFadeIn(fade_seconds),
-        ])
-        clip = clip.with_position(("center", "center"))
-        clips.append(clip)
-
-    if status_cb:
-        status_cb("Stitching scenes into the final video...")
-
-    final = concatenate_videoclips(clips, method="compose", padding=-fade_seconds)
-    final = final.with_effects([vfx.Resize(new_size=(width, height))])
-
-    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-        tmp_path = tmp.name
-    try:
-        final.write_videofile(
-            tmp_path, fps=fps, codec="libx264", audio=False,
-            logger=None,
-        )
-        with open(tmp_path, "rb") as f:
-            video_bytes = f.read()
-    finally:
-        for clip in clips:
-            clip.close()
-        final.close()
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-    return video_bytes
-
-
-def render_video_block(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                        mistral_key: str, mistral_model: str, num_scenes: int, seconds_per_scene: int,
-                        product_name: str = "") -> None:
-    """Show the generated video (if any) for a history entry, plus a
-    regenerate button that reroles the whole scene set."""
-    video_key = history_entry.get("video_key")
-    if video_key and video_key in st.session_state:
-        st.video(st.session_state[video_key])
-        st.download_button(
-            "⬇️ Download video",
-            data=st.session_state[video_key],
-            file_name=f"{video_key}.mp4",
-            mime="video/mp4",
-            key=f"dl_{video_key}",
-        )
-    if st.button("🔁 Regenerate video", key=f"regen_video_{video_key or id(history_entry)}"):
-        _make_video_for_entry(
-            history_entry, website, topic, category, tone, post_text,
-            mistral_key, mistral_model, num_scenes, seconds_per_scene, product_name,
-        )
-        st.rerun()
-
-
-def _make_video_for_entry(history_entry: dict, website: str, topic: str, category: str, tone: str, post_text: str,
-                           mistral_api_key: str, mistral_image_model: str,
-                           num_scenes: int, seconds_per_scene: int, product_name: str = "") -> None:
-    """Storyboard the post into scenes, generate a scene image for each,
-    stitch them into a slideshow video, and attach it to a history entry."""
-    vid_width, vid_height = PLATFORM_VIDEO_SIZE.get(website, (1080, 1920))
-    aspect_label = _aspect_label(vid_width, vid_height)
-    scenes = split_into_scenes(topic, post_text, num_scenes)
-    scene_prompts = [
-        build_image_prompt(topic, category, tone, scene, aspect_label, product_name) for scene in scenes
-    ]
-    state_key = f"post_video_{len(st.session_state.history)}"
-    status_box = st.empty()
-    try:
-        video_bytes = generate_video_bytes(
-            scene_prompts, vid_width, vid_height,
-            mistral_api_key, mistral_image_model, seconds_per_scene=seconds_per_scene,
-            status_cb=lambda msg: status_box.info(f"🎬 {msg}"),
-        )
-        st.session_state[state_key] = video_bytes
-        history_entry["video_key"] = state_key
-        history_entry["video_scenes"] = scenes
-    except Exception as e:
-        st.error(f"Video generation failed: {e}")
-    finally:
-        status_box.empty()
-
-
-# ---------------------------------------------------------------------------
 # Generation Logic Engine
 # ---------------------------------------------------------------------------
 if "history" not in st.session_state:
@@ -1207,8 +1013,8 @@ if generate:
         st.error("Please enter your Groq API key in the sidebar (or set GROQ_API_KEY).")
     elif not topic.strip():
         st.error("Please describe what the post should be about.")
-    elif (generate_image_toggle or generate_video_toggle) and not mistral_api_key:
-        st.error("Please enter your Mistral API key in the sidebar to generate images or video.")
+    elif generate_image_toggle and not mistral_api_key:
+        st.error("Please enter your Mistral API key in the sidebar to generate images.")
     else:
         emoji_instruction = (
             "Include a few relevant emojis, used sparingly." if use_emojis else "Do not use any emojis."
@@ -1266,9 +1072,6 @@ if generate:
                 "tone": tone,
                 "product_name": product_name,
                 "generate_image_toggle": generate_image_toggle,
-                "generate_video_toggle": generate_video_toggle,
-                "video_num_scenes": video_num_scenes,
-                "video_seconds_per_scene": video_seconds_per_scene,
                 "mistral_api_key": mistral_api_key,
                 "mistral_image_model": mistral_image_model,
             }
@@ -1306,20 +1109,12 @@ if st.session_state.pending_variants:
             "tone": cfg["tone"],
             "product_name": cfg.get("product_name", ""),
             "image_key": None,
-            "video_key": None,
         }
 
         if cfg["generate_image_toggle"]:
             _make_image_for_entry(
                 history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
                 chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"], cfg.get("product_name", ""),
-            )
-
-        if cfg.get("generate_video_toggle"):
-            _make_video_for_entry(
-                history_entry, cfg["website"], cfg["topic"], cfg["category"], cfg["tone"],
-                chosen_text, cfg["mistral_api_key"], cfg["mistral_image_model"],
-                cfg["video_num_scenes"], cfg["video_seconds_per_scene"], cfg.get("product_name", ""),
             )
 
         st.session_state.history.append(history_entry)
@@ -1355,14 +1150,3 @@ if st.session_state.history:
                 )
                 historical_post["image_key"] = image_key
                 historical_post["image_prompt"] = image_prompt
-
-            video_key = historical_post.get("video_key")
-            if video_key and video_key in st.session_state:
-                render_video_block(
-                    historical_post, historical_post["platform"],
-                    historical_post.get("topic", ""), historical_post.get("category", ""),
-                    historical_post.get("tone", ""), historical_post["content"],
-                    mistral_api_key, mistral_image_model,
-                    video_num_scenes, video_seconds_per_scene,
-                    historical_post.get("product_name", ""),
-                )
