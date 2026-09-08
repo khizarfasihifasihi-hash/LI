@@ -24,6 +24,7 @@ st.set_page_config(
 
 
 CATEGORIES = [
+    "Startup",
     'Posting on Website',
     'Hiring me',
     'New job announcement',
